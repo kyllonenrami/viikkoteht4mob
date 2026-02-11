@@ -1,65 +1,73 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, FlatList, Alert } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, FlatList } from 'react-native';
 import { useEffect, useState } from 'react';
-import * as SQLite from 'expo-sqlite';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Todo } from './types/Todo';
 import { TodoItem } from './components/Row';
 
+const STORAGE_KEY = '@todos';
+
 export default function App() {
-  const [db, setDb] = useState<SQLite.SQLiteDatabase | null>(null);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [inputText, setInputText] = useState('');
 
   useEffect(() => {
-    const initDB = async () => {
-      const database = await SQLite.openDatabaseAsync('todos.db');
-      setDb(database);
-
-      await database.execAsync(`
-        CREATE TABLE IF NOT EXISTS todos (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          text TEXT NOT NULL,
-          completed INTEGER DEFAULT 0
-        );
-      `);
-
-      loadTodos(database);
-    };
-
-    initDB();
+    loadTodos();
   }, []);
 
-  const loadTodos = async (database: SQLite.SQLiteDatabase) => {
-    const result = await database.getAllAsync<Todo>('SELECT * FROM todos ORDER BY id DESC');
-    setTodos(result);
+  const loadTodos = async () => {
+    try {
+      const storedTodos = await AsyncStorage.getItem(STORAGE_KEY);
+      if (storedTodos) {
+        setTodos(JSON.parse(storedTodos));
+      }
+    } catch (error) {
+      console.log('Virhe ladattaessa tehtäviä:', error);
+    }
   };
 
- 
+  const saveTodos = async (newTodos: Todo[]) => {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(newTodos));
+      setTodos(newTodos);
+    } catch (error) {
+      console.log('Virhe tallennettaessa tehtäviä:', error);
+    }
+  };
+
   const addTodo = async () => {
-    if (!inputText.trim() || !db) return;
+    if (!inputText.trim()) return;
 
-    await db.runAsync('INSERT INTO todos (text) VALUES (?)', inputText);
+    const newTodo: Todo = {
+      id: Date.now(),
+      text: inputText,
+      completed: 0,
+    };
+
+    const updatedTodos = [newTodo, ...todos];
+    await saveTodos(updatedTodos);
     setInputText('');
-    loadTodos(db);
   };
 
-  const toggleTodo = async (id: number, completed: number) => {
-    if (!db) return;
-    await db.runAsync('UPDATE todos SET completed = ? WHERE id = ?', completed ? 0 : 1, id);
-    loadTodos(db);
+  const toggleTodo = async (id: number) => {
+    const updatedTodos = todos.map(todo =>
+      todo.id === id
+        ? { ...todo, completed: todo.completed ? 0 : 1 }
+        : todo
+    );
+
+    await saveTodos(updatedTodos);
   };
 
-  // Delete todo
   const deleteTodo = async (id: number) => {
-    if (!db) return;
-    await db.runAsync('DELETE FROM todos WHERE id = ?', id);
-    loadTodos(db);
+    const updatedTodos = todos.filter(todo => todo.id !== id);
+    await saveTodos(updatedTodos);
   };
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Tehtävä sovellus</Text>
-      
+
       <View style={styles.inputContainer}>
         <TextInput
           style={styles.input}
@@ -78,7 +86,11 @@ export default function App() {
         keyExtractor={(item) => item.id.toString()}
         style={styles.list}
         renderItem={({ item }) => (
-          <TodoItem item={item} toggleTodo={toggleTodo} deleteTodo={deleteTodo} />
+          <TodoItem
+            item={item}
+            toggleTodo={() => toggleTodo(item.id)}
+            deleteTodo={() => deleteTodo(item.id)}
+          />
         )}
       />
 
@@ -127,33 +139,5 @@ const styles = StyleSheet.create({
   },
   list: {
     flex: 1,
-  },
-  todoItem: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    padding: 15,
-    borderRadius: 8,
-    marginBottom: 10,
-    alignItems: 'center',
-  },
-  todoText: {
-    flex: 1,
-  },
-  todoTextContent: {
-    fontSize: 16,
-  },
-  completedText: {
-    textDecorationLine: 'line-through',
-    color: '#999',
-  },
-  deleteButton: {
-    backgroundColor: '#FF3B30',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 6,
-  },
-  deleteButtonText: {
-    color: 'white',
-    fontWeight: '600',
   },
 });
